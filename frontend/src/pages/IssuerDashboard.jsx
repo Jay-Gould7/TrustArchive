@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTrustProtocol } from "../hooks/useTrustProtocol";
 import { decryptWithDerivedKey, deriveFileKey, fetchEncryptedFromPinataGateway } from "../services/securityService";
+import { batchIssueEncryptedSBTs } from "../services/cryptoEnvelope";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -513,7 +514,7 @@ export default function IssuerDashboard() {
   const [templateCreateError, setTemplateCreateError] = useState("");
   const [templateIdDraft, setTemplateIdDraft] = useState("");
   const [templateNameDraft, setTemplateNameDraft] = useState("");
-  const [templateCategoryDraft, setTemplateCategoryDraft] = useState("学术认证");
+  const [templateCategoryDraft, setTemplateCategoryDraft] = useState("Academic Certification");
   const [templateDescriptionDraft, setTemplateDescriptionDraft] = useState("");
   const [templateCoverUrlDraft, setTemplateCoverUrlDraft] = useState("");
   const [templateCoverFile, setTemplateCoverFile] = useState(null);
@@ -820,7 +821,7 @@ export default function IssuerDashboard() {
     setTemplateCreateError("");
     setTemplateIdDraft("");
     setTemplateNameDraft("");
-    setTemplateCategoryDraft("学术认证");
+    setTemplateCategoryDraft("Academic Certification");
     setTemplateDescriptionDraft("");
     setTemplateCoverUrlDraft("");
     setTemplateCoverFile(null);
@@ -916,7 +917,7 @@ export default function IssuerDashboard() {
       const templateSchema = await fetchJsonFromIpfsCid(tpl.schemaCID);
       const schemaFields = Array.isArray(templateSchema?.fields) ? templateSchema.fields : [];
       if (!schemaFields.length) throw new Error("模板 schema 缺少 fields 定义");
-      const templateCategory = String(templateSchema?.category || "学术认证");
+      const templateCategory = String(templateSchema?.category || "Academic Certification");
       const coverImageUrl = String(templateSchema?.image || templateSchema?.coverImageUrl || "");
       const parsed = parseCsv(batchCsvText);
       if (!parsed.rows.length) throw new Error("CSV 为空或格式不正确");
@@ -924,104 +925,114 @@ export default function IssuerDashboard() {
         parsed.header.find((h) => h.toLowerCase() === "wallet_address") || parsed.header.find((h) => h.toLowerCase() === "address") || "";
       if (!addrKey) throw new Error("CSV 必须包含 wallet_address 列");
 
-      const attachmentKeyRaw = String(batchAttachmentColumn || "").trim();
-      const attachmentKey =
-        attachmentKeyRaw && parsed.header.find((h) => h.toLowerCase() === attachmentKeyRaw.toLowerCase())
-          ? parsed.header.find((h) => h.toLowerCase() === attachmentKeyRaw.toLowerCase())
-          : attachmentKeyRaw;
-      const fileMap = new Map();
-      for (const f of batchAttachments || []) {
-        if (f && f.name) fileMap.set(f.name, f);
-      }
-
-      const distribution = [];
-      const leaves = [];
-
+      // --- Collect all recipient addresses from CSV ---
       const headerKeyMap = new Map();
       for (const h of parsed.header || []) headerKeyMap.set(String(h || "").toLowerCase(), h);
+
+      // Optional: CSV may contain a "public_key" column as an override
+      const pubKeyCol =
+        parsed.header.find((h) => h.toLowerCase() === "public_key") ||
+        parsed.header.find((h) => h.toLowerCase() === "publickey") ||
+        "";
+
+      const allAddresses = [];
+      const csvRowsForSchema = [];
 
       for (let i = 0; i < parsed.rows.length; i++) {
         const r = parsed.rows[i];
         const rawAddr = String(r[addrKey] || "").trim();
         const userAddress = ethers.getAddress(rawAddr);
-        setBatchProgressText(`正在生成元数据 ${i + 1}/${parsed.rows.length}...`);
+        allAddresses.push(userAddress);
 
-        const fields = {};
+        // Build per-row field values for schema validation
+        const rowFields = {};
         for (const f of schemaFields) {
           const key = String(f?.key || "").trim();
           if (!key) continue;
           const col = headerKeyMap.get(key.toLowerCase()) || key;
-          const val = String(r[col] ?? "").trim();
-          if (f?.required && !val) throw new Error(`第 ${i + 1} 行缺少必填字段：${key}`);
-          fields[key] = val;
+          rowFields[key] = String(r[col] ?? "").trim();
         }
-        const attachmentPath = tpl.hasPrivateAttachment ? String(r[attachmentKey] || "").trim() : "";
-
-        let attachmentCID = "";
-        if (tpl.hasPrivateAttachment) {
-          if (!attachmentKey) throw new Error("请设置附件列名");
-          if (!attachmentPath) throw new Error(`第 ${i + 1} 行缺少附件路径`);
-          setBatchProgressText(`正在上传第 ${i + 1}/${parsed.rows.length} 个文件...`);
-          if (isHttpUrl(attachmentPath)) {
-            const res = await fetch(attachmentPath);
-            if (!res.ok) throw new Error(`附件下载失败：${attachmentPath}`);
-            const blob = await res.blob();
-            const guessedName = attachmentPath.split("/").pop() || `attachment-${i + 1}`;
-            const file = new File([blob], guessedName, { type: blob.type || "application/octet-stream" });
-            attachmentCID = await uploadFileToIpfs(file);
-          } else {
-            const local = fileMap.get(attachmentPath);
-            if (!local) throw new Error(`找不到附件文件：${attachmentPath}`);
-            attachmentCID = await uploadFileToIpfs(local);
-          }
-        }
-
-        const attributes = [];
-        for (const [k, v] of Object.entries(fields)) {
-          attributes.push({ trait_type: k, value: v });
-        }
-
-        const meta = {
-          "@context": "https://schema.org",
-          "@type": "TrustArchiveCredential",
-          name: String(templateSchema?.name || tpl.templateId || "Credential"),
-          category: String(templateSchema?.category || templateCategory || "学术认证"),
-          issuerName: issuerName || "Approved Issuer",
-          issuerAddress: account,
-          image: String(templateSchema?.image || coverImageUrl || ""),
-          attachmentCID: attachmentCID || "",
-          attributes
-        };
-        const tokenMetaCID = await uploadJsonToIpfs(meta);
-        const tokenURI = toIpfsUri(tokenMetaCID);
-
-        const leaf = ethers.keccak256(
-          ethers.solidityPacked(["address", "string", "string"], [userAddress, tokenURI, attachmentCID || ""])
-        );
-        leaves.push(leaf);
-        distribution.push({ address: userAddress, tokenURI, attachmentCID: attachmentCID || "" });
+        csvRowsForSchema.push(rowFields);
       }
 
-      setBatchProgressText("正在构建 Merkle Tree...");
-      const { root, proofs } = buildMerkleTreeSorted(leaves);
-      const entries = distribution.map((d, i) => ({ ...d, proof: proofs[i] }));
-      const distCID = await uploadJsonToIpfs({
-        kind: "batch-distribution-v1",
-        issuer: account,
+      // --- Fetch recipient public keys from backend ---
+      // These were registered when each user first connected their wallet.
+      setBatchProgressText("Fetching recipient public keys from registry...");
+      let pubKeyMap = new Map();
+      try {
+        const res = await fetch("/api/users/public-keys", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ addresses: allAddresses })
+        });
+        if (!res.ok) throw new Error(`Backend responded with ${res.status}`);
+        const data = await res.json();
+        // Expected response: { keys: { "0xAAA...": "0x04...", "0xBBB...": "0x04..." } }
+        const keysObj = data?.keys || {};
+        for (const [addr, key] of Object.entries(keysObj)) {
+          if (key) pubKeyMap.set(addr.toLowerCase(), key);
+        }
+      } catch (fetchErr) {
+        throw new Error(
+          `Failed to fetch recipient public keys from backend: ${fetchErr.message}. ` +
+          `Ensure all recipients have connected to TrustArchive at least once.`
+        );
+      }
+
+      // --- Build recipients array, merging CSV overrides with backend keys ---
+      const recipients = [];
+      for (let i = 0; i < allAddresses.length; i++) {
+        const userAddress = allAddresses[i];
+        const r = parsed.rows[i];
+
+        // Priority: CSV public_key column > backend registry
+        let publicKey = pubKeyCol ? String(r[pubKeyCol] || "").trim() : "";
+        if (!publicKey) {
+          publicKey = pubKeyMap.get(userAddress.toLowerCase()) || "";
+        }
+
+        if (!publicKey) {
+          throw new Error(
+            `Missing public key for recipient ${userAddress}. ` +
+            `This user has not registered their public key yet. ` +
+            `They must connect to TrustArchive at least once, or provide the key in a "public_key" CSV column.`
+          );
+        }
+
+        recipients.push({ address: userAddress, publicKey });
+      }
+
+      // --- Read the shared attachment file into an ArrayBuffer (if applicable) ---
+      let fileBuffer = null;
+      if (tpl.hasPrivateAttachment && batchAttachments.length > 0) {
+        const attachFile = batchAttachments[0];
+        setBatchProgressText("Reading attachment file...");
+        fileBuffer = await attachFile.arrayBuffer();
+      }
+
+      // --- Delegate to the hybrid-encryption batch service ---
+      const result = await batchIssueEncryptedSBTs({
+        fileBuffer,
+        recipients,
         templateId: batchTemplateId,
-        templateCategory,
+        templateSchema,
+        issuerName: issuerName || "Approved Issuer",
+        issuerAddress: account,
         coverImageUrl,
-        merkleRoot: root,
-        total: entries.length,
-        createdAt: new Date().toISOString(),
-        entries
+        templateCategory,
+        csvRows: csvRowsForSchema,
+        schemaFields,
+        uploadJsonToIpfs,
+        createBatchIssuance,
+        onProgress: (msg) => setBatchProgressText(msg)
       });
 
-      setBatchProgressText("等待钱包确认交易...");
-      await createBatchIssuance({ merkleRoot: root, templateId: batchTemplateId, distributionCID: distCID, total: entries.length });
       setBatchProgressText("交易已确认，正在刷新批次...");
-
-      setBatchResult({ merkleRoot: root, distributionCID: distCID, total: entries.length });
+      setBatchResult({
+        merkleRoot: result.merkleRoot,
+        distributionCID: result.distributionCID,
+        total: result.total
+      });
       setBatchProgressText("完成");
       setBatchOpen(false);
       await refreshBatches();

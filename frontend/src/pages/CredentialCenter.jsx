@@ -793,7 +793,7 @@ export default function CredentialCenter() {
     for (const t of batchTokens || []) {
       const meta = batchTokenMetas?.[String(t.tokenId)] || null;
       const metaName = typeof meta?.name === "string" && meta.name.trim() ? meta.name : t.templateId || "Batch SBT";
-      const metaCategory = typeof meta?.category === "string" && meta.category.trim() ? meta.category : "批量签发";
+      const metaCategory = "Verifiable Credential";
       const metaIssuerName = typeof meta?.issuerName === "string" && meta.issuerName.trim() ? meta.issuerName : t.issuerName || "";
       const metaIssuerAddress =
         typeof meta?.issuerAddress === "string" && meta.issuerAddress.trim() ? meta.issuerAddress : t.issuer || "";

@@ -279,6 +279,61 @@ function createServer() {
     }
   });
 
+  // ── Public Key Registration (called at wallet connect) ──
+  app.post("/api/connect/register-key", async (req, res) => {
+    try {
+      const walletAddress = normalizeAddress(req.body?.walletAddress);
+      const publicKey = String(req.body?.publicKey || "").trim();
+      if (!publicKey) throw new Error("publicKey is required");
+      // Validate: uncompressed secp256k1 public key should be 0x04 + 128 hex chars = 132 chars
+      if (!publicKey.startsWith("0x04") || publicKey.length !== 132) {
+        throw new Error("Invalid uncompressed public key format");
+      }
+      // Verify the public key actually derives to this wallet address
+      const derived = ethers.computeAddress(publicKey);
+      if (derived.toLowerCase() !== walletAddress.toLowerCase()) {
+        throw new Error("Public key does not match wallet address");
+      }
+      await exec(
+        `INSERT INTO users (wallet_address, public_key) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE public_key = VALUES(public_key)`,
+        [walletAddress, publicKey]
+      );
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
+  // ── Bulk Public Key Lookup (called by issuer during batch issuance) ──
+  app.post("/api/users/public-keys", async (req, res) => {
+    try {
+      const addresses = req.body?.addresses;
+      if (!Array.isArray(addresses) || !addresses.length) {
+        throw new Error("addresses array is required");
+      }
+      if (addresses.length > 500) {
+        throw new Error("Too many addresses (max 500)");
+      }
+      const normalized = addresses.map((a) => normalizeAddress(a));
+      // Build parameterized query with IN (?, ?, ...)
+      const placeholders = normalized.map(() => "?").join(",");
+      const rows = await query(
+        `SELECT wallet_address, public_key FROM users WHERE wallet_address IN (${placeholders}) AND public_key IS NOT NULL`,
+        normalized
+      );
+      const keys = {};
+      for (const r of rows || []) {
+        if (r.wallet_address && r.public_key) {
+          keys[r.wallet_address] = r.public_key;
+        }
+      }
+      res.json({ ok: true, keys });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e?.message || String(e) });
+    }
+  });
+
   return app;
 }
 

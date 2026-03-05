@@ -15,9 +15,11 @@ By preserving user privacy and data ownership, TrustArchive aims to build a high
 ## Key Capabilities (High Level)
 
 - End-to-end encrypted storage (envelope encryption)
+- Hybrid encryption batch issuance (AES-256-GCM + ECIES Digital Envelope)
+- Public key registry via signature recovery (EIP-191)
 - Verifiable evidence and secure proof sharing
 - Personal on-chain archive registry (ArchivesRegistry)
-- SBT-based credential verification
+- SBT-based credential verification (Merkle proof claim)
 - Trust scoring system (on-chain + off-chain signals)
 - Time-limited access tokens (5-minute validity)
 - Zero raw data exposure
@@ -100,10 +102,12 @@ Dynamic reputation based on:
 
 ### Cryptography
 
-- AES-256-GCM encryption  
+- AES-256-GCM symmetric encryption (Web Crypto API)  
+- ECIES asymmetric key wrapping (secp256k1)  
+- Public key extraction via Signature Recovery (EIP-191)  
 - Master key derivation  
 - Envelope encryption  
-- Merkle tree  
+- Sorted Merkle tree (on-chain claim verification)  
 - Recovery key mechanism  
 
 ---
@@ -210,6 +214,10 @@ Set admin allowlist and withdrawal defaults in both backend and frontend environ
 `POST /api/share/safe-link/created`  
 `POST /api/verify/safe-link`  
 `GET /api/verify/safe-link/status/:cid`  
+
+### Public Key Registry
+`POST /api/connect/register-key` — Register public key on wallet connect  
+`POST /api/users/public-keys` — Bulk lookup recipient public keys  
 
 ### Enterprise Verification
 `POST /api/v1/verify/sbt`  

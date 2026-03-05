@@ -8,12 +8,12 @@ export function cn(...inputs) {
 }
 
 export const GlassCard = ({ children, className, ...props }) => (
-  <div 
+  <div
     className={cn(
       "relative overflow-hidden rounded-2xl border border-white/10 bg-[#151921]/60 backdrop-blur-xl shadow-2xl transition-all duration-300",
       "hover:border-white/20 hover:bg-[#151921]/80 hover:shadow-purple-500/10",
       className
-    )} 
+    )}
     {...props}
   >
     <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-50" />
@@ -66,7 +66,7 @@ export const StatusBadge = ({ status, children, className }) => {
 
   return (
     <span className={cn(
-      "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm",
+      "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium backdrop-blur-sm whitespace-nowrap",
       variant,
       className
     )}>

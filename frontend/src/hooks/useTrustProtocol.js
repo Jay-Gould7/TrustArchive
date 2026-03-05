@@ -586,6 +586,65 @@ export function TrustProtocolProvider({ children }) {
       const network = await provider.getNetwork();
       setChainId(network.chainId.toString());
       await bootstrapSecurityForAccount(selected);
+
+      // --- Public Key Extraction via Signature Recovery (SIGN-ONCE) ---
+      // Only prompt if this user has NOT already registered their public key.
+      // Check order: localStorage cache → backend API → prompt signature.
+      const pubKeyCacheKey = `TA_PUBKEY_REGISTERED_${selected.toLowerCase()}`;
+      const alreadyCached = (() => { try { return localStorage.getItem(pubKeyCacheKey) === "1"; } catch { return false; } })();
+
+      if (!alreadyCached) {
+        // Check backend to see if the key was registered in a previous session
+        let alreadyOnBackend = false;
+        try {
+          const checkRes = await fetch("/api/users/public-keys", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ addresses: [selected] })
+          });
+          if (checkRes.ok) {
+            const checkData = await checkRes.json();
+            const existing = checkData?.keys?.[selected] || checkData?.keys?.[selected.toLowerCase()] || "";
+            if (existing) {
+              alreadyOnBackend = true;
+              try { localStorage.setItem(pubKeyCacheKey, "1"); } catch { }
+            }
+          }
+        } catch { }
+
+        if (!alreadyOnBackend) {
+          // First time — prompt user to sign a welcome message
+          try {
+            const signer = await provider.getSigner();
+            const nonce = `${Date.now()}-${crypto.getRandomValues(new Uint8Array(16)).reduce((s, b) => s + b.toString(16).padStart(2, "0"), "")}`;
+            const message =
+              "Welcome to TrustArchive!\n" +
+              "Please sign this message to verify your identity.\n" +
+              "This will NOT cost any gas.\n\n" +
+              `Nonce: ${nonce}`;
+
+            const signature = await signer.signMessage(message);
+            const digest = ethers.hashMessage(message);
+            const uncompressedPubKey = ethers.SigningKey.recoverPublicKey(digest, signature);
+
+            // Verify the recovered key belongs to this address
+            const derived = ethers.computeAddress(uncompressedPubKey);
+            if (derived.toLowerCase() === selected.toLowerCase()) {
+              // Report to backend (fire-and-forget, do not block login)
+              fetch("/api/connect/register-key", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ walletAddress: selected, publicKey: uncompressedPubKey })
+              }).then(() => {
+                try { localStorage.setItem(pubKeyCacheKey, "1"); } catch { }
+              }).catch(() => { });
+            }
+          } catch {
+            // User rejected signature — non-blocking, they can still use the DApp
+          }
+        }
+      }
+
       return selected;
     } finally {
       setIsConnecting(false);
@@ -686,10 +745,10 @@ export function TrustProtocolProvider({ children }) {
       report: typeof report === "string" ? report.trim() : "",
       location: location
         ? {
-            mapsUrl: location?.mapsUrl || "",
-            lat: typeof location?.lat === "number" ? location.lat : null,
-            lng: typeof location?.lng === "number" ? location.lng : null
-          }
+          mapsUrl: location?.mapsUrl || "",
+          lat: typeof location?.lat === "number" ? location.lat : null,
+          lng: typeof location?.lng === "number" ? location.lng : null
+        }
         : null,
       files: normalizedFiles,
       blockHeight,
@@ -783,24 +842,24 @@ export function TrustProtocolProvider({ children }) {
 
     const normalized = parsed
       ? {
-          report: typeof parsed?.report === "string" ? parsed.report : "",
-          createdAt: typeof parsed?.createdAt === "string" ? parsed.createdAt : "",
-          blockHeight:
-            typeof parsed?.blockHeight === "number"
-              ? parsed.blockHeight
-              : parsed?.blockHeight != null
-                ? Number(parsed.blockHeight)
-                : null,
-          expiryTime:
-            typeof parsed?.expiryTime === "number"
-              ? parsed.expiryTime
-              : parsed?.expiryTime != null
-                ? Number(parsed.expiryTime)
-                : null,
-          location: parsed?.location || null,
-          files: Array.isArray(parsed?.files) ? parsed.files : parsed?.file ? [parsed.file] : [],
-          raw: parsed
-        }
+        report: typeof parsed?.report === "string" ? parsed.report : "",
+        createdAt: typeof parsed?.createdAt === "string" ? parsed.createdAt : "",
+        blockHeight:
+          typeof parsed?.blockHeight === "number"
+            ? parsed.blockHeight
+            : parsed?.blockHeight != null
+              ? Number(parsed.blockHeight)
+              : null,
+        expiryTime:
+          typeof parsed?.expiryTime === "number"
+            ? parsed.expiryTime
+            : parsed?.expiryTime != null
+              ? Number(parsed.expiryTime)
+              : null,
+        location: parsed?.location || null,
+        files: Array.isArray(parsed?.files) ? parsed.files : parsed?.file ? [parsed.file] : [],
+        raw: parsed
+      }
       : { report: plain, createdAt: "", location: null, files: [], raw: plain };
 
     return { plain, parsed: normalized, gatewayUrl: url };
@@ -829,24 +888,24 @@ export function TrustProtocolProvider({ children }) {
 
     const normalized = parsed
       ? {
-          report: typeof parsed?.report === "string" ? parsed.report : "",
-          createdAt: typeof parsed?.createdAt === "string" ? parsed.createdAt : "",
-          blockHeight:
-            typeof parsed?.blockHeight === "number"
-              ? parsed.blockHeight
-              : parsed?.blockHeight != null
-                ? Number(parsed.blockHeight)
-                : null,
-          expiryTime:
-            typeof parsed?.expiryTime === "number"
-              ? parsed.expiryTime
-              : parsed?.expiryTime != null
-                ? Number(parsed.expiryTime)
-                : null,
-          location: parsed?.location || null,
-          files: Array.isArray(parsed?.files) ? parsed.files : parsed?.file ? [parsed.file] : [],
-          raw: parsed
-        }
+        report: typeof parsed?.report === "string" ? parsed.report : "",
+        createdAt: typeof parsed?.createdAt === "string" ? parsed.createdAt : "",
+        blockHeight:
+          typeof parsed?.blockHeight === "number"
+            ? parsed.blockHeight
+            : parsed?.blockHeight != null
+              ? Number(parsed.blockHeight)
+              : null,
+        expiryTime:
+          typeof parsed?.expiryTime === "number"
+            ? parsed.expiryTime
+            : parsed?.expiryTime != null
+              ? Number(parsed.expiryTime)
+              : null,
+        location: parsed?.location || null,
+        files: Array.isArray(parsed?.files) ? parsed.files : parsed?.file ? [parsed.file] : [],
+        raw: parsed
+      }
       : { report: plain, createdAt: "", location: null, files: [], raw: plain };
 
     return { plain, parsed: normalized, gatewayUrl: url };

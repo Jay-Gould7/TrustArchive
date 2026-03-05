@@ -369,6 +369,7 @@ async function ensureSchema() {
     await conn.execute(
       `CREATE TABLE IF NOT EXISTS users (
         wallet_address VARCHAR(42) NOT NULL,
+        public_key VARCHAR(140) NULL,
         password_envelope TEXT NULL,
         password_salt VARCHAR(64) NULL,
         password_kdf_iters INT NOT NULL DEFAULT 120000,
@@ -381,6 +382,7 @@ async function ensureSchema() {
         PRIMARY KEY (wallet_address)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
+    await ensureColumn(conn, db, "users", "public_key", "`public_key` VARCHAR(140) NULL");
     await ensureColumn(conn, db, "users", "password_envelope", "`password_envelope` TEXT NULL");
     await ensureColumn(conn, db, "users", "password_salt", "`password_salt` VARCHAR(64) NULL");
     await ensureColumn(conn, db, "users", "password_kdf_iters", "`password_kdf_iters` INT NOT NULL DEFAULT 120000");
