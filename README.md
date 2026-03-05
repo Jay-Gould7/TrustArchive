@@ -271,6 +271,8 @@ Not production-ready.
 
 ## Demo
 
+<img width="2168" height="1266" alt="屏幕截图 2026-02-21 012321" src="https://github.com/user-attachments/assets/111bdd00-b79c-446a-93d8-2f6f691e6b62" />
+
 Coming soon...
 
 ---
@@ -283,6 +285,5 @@ MIT License
 
 ## Author
 
- Jay-Gold111  
- Web3 Developer | Security-focused Engineer  
+ Jay-Gould7   
  Contact: gold.xxtxx@gmail.com
