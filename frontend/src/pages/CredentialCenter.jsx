@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { useTrustProtocol } from "../hooks/useTrustProtocol";
 import { fetchEncryptedFromPinataGateway, decryptWithDerivedKey, deriveFileKey, unpinFromPinata } from "../services/securityService";
+import { decryptForSingleRecipient } from "../services/cryptoEnvelope";
 import { logSafeLinkCreated } from "../services/trustScoreService";
 import SBTCard from "../components/SBTCard";
 
@@ -1271,13 +1272,29 @@ export default function CredentialCenter() {
       const cid = offer?.attachmentCid;
       if (!cid) throw new Error("Missing institution attachment CID");
       const { raw } = await fetchEncryptedFromPinataGateway(cid);
-      if (!raw || typeof raw !== "object" || !raw.dataUrl) throw new Error("Invalid institution attachment format");
+      if (!raw || typeof raw !== "object") throw new Error("Invalid institution attachment format");
+
+      // Detect encrypted-offer-v1 envelope vs legacy plaintext
+      let attachmentData;
+      if (raw.scheme === "encrypted-offer-v1") {
+        // Decrypt using deterministic shared key (issuer + recipient addresses)
+        attachmentData = await decryptForSingleRecipient({
+          envelope: raw,
+          issuerAddress: offer.issuer || raw.issuer || "",
+          recipientAddress: account
+        });
+      } else {
+        // Legacy plaintext format
+        if (!raw.dataUrl) throw new Error("Invalid institution attachment format");
+        attachmentData = raw;
+      }
+
       const payload = {
         kind: "credential-offer-private",
-        name: raw.name || "attachment",
-        type: raw.type || "",
-        size: raw.size || 0,
-        dataUrl: raw.dataUrl,
+        name: attachmentData.name || "attachment",
+        type: attachmentData.type || "",
+        size: attachmentData.size || 0,
+        dataUrl: attachmentData.dataUrl,
         student: account,
         title: offer.title,
         category: Number(offer.category) || 0,

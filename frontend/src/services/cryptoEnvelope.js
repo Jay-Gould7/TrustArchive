@@ -373,3 +373,110 @@ export async function batchIssueEncryptedSBTs({
         entries: entriesWithProof
     };
 }
+
+// ============================================================
+//  Phase 4 — Single-Recipient Encryption (for self-issuance)
+//
+//  MetaMask never exposes private keys, so ECIES decryption is
+//  impossible in the browser. Instead, we use a deterministic
+//  shared symmetric key derived from both addresses:
+//    key = keccak256(abi.encodePacked(issuerAddr, recipientAddr, domainSalt))
+//  Both parties can compute this key. The attachment is encrypted
+//  at rest on IPFS — much stronger than plaintext.
+// ============================================================
+
+const OFFER_DOMAIN_SALT = "TrustArchive:credential-offer-envelope-v1";
+
+/**
+ * Derive a deterministic AES-256 key that both issuer and recipient can compute.
+ * @param {{ issuerAddress: string, recipientAddress: string }} opts
+ * @returns {Uint8Array} 32-byte key
+ */
+export function deriveOfferSharedKey({ issuerAddress, recipientAddress }) {
+    const packed = ethers.solidityPacked(
+        ["address", "address", "string"],
+        [ethers.getAddress(issuerAddress), ethers.getAddress(recipientAddress), OFFER_DOMAIN_SALT]
+    );
+    const hash = ethers.keccak256(packed); // bytes32
+    return fromHex(hash);
+}
+
+/**
+ * Encrypt an arbitrary JSON payload for a single recipient using AES-256-GCM
+ * with a deterministic shared key derived from both addresses.
+ *
+ * @param {{ payload: object, issuerAddress: string, recipientAddress: string }} opts
+ * @returns {Promise<object>}  Encrypted envelope suitable for `uploadJsonToIpfs`
+ */
+export async function encryptForSingleRecipient({ payload, issuerAddress, recipientAddress }) {
+    if (!payload || typeof payload !== "object") {
+        throw new Error("payload must be a non-null object");
+    }
+    if (!issuerAddress || !recipientAddress) {
+        throw new Error("Both issuerAddress and recipientAddress are required");
+    }
+
+    // 1. Derive deterministic shared key
+    const keyBytes = deriveOfferSharedKey({ issuerAddress, recipientAddress });
+
+    // 2. Generate random IV (12 bytes for AES-GCM)
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+
+    // 3. Encrypt the JSON payload with AES-256-GCM
+    const plainBytes = new TextEncoder().encode(JSON.stringify(payload));
+    const importedKey = await crypto.subtle.importKey(
+        "raw", keyBytes.buffer, { name: "AES-GCM" }, false, ["encrypt"]
+    );
+    const ciphertextBuf = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv }, importedKey, plainBytes
+    );
+
+    return {
+        scheme: "encrypted-offer-v1",
+        ivBase64: toBase64(iv),
+        encryptedPayload: toBase64(ciphertextBuf),
+        issuer: ethers.getAddress(issuerAddress),
+        recipient: ethers.getAddress(recipientAddress),
+        encryption: {
+            algorithm: "AES-256-GCM",
+            keyDerivation: "keccak256(issuer+recipient+domainSalt)"
+        }
+    };
+}
+
+/**
+ * Decrypt a single-recipient encrypted envelope produced by
+ * `encryptForSingleRecipient`. Both parties can decrypt because
+ * the key is derived from their addresses.
+ *
+ * @param {{ envelope: object, issuerAddress: string, recipientAddress: string }} opts
+ * @returns {Promise<object>}  The original JSON payload
+ */
+export async function decryptForSingleRecipient({ envelope, issuerAddress, recipientAddress }) {
+    if (!envelope || envelope.scheme !== "encrypted-offer-v1") {
+        throw new Error("Not an encrypted-offer-v1 envelope");
+    }
+
+    // 1. Derive the same deterministic shared key
+    const issuer = issuerAddress || envelope.issuer || "";
+    const recipient = recipientAddress || envelope.recipient || "";
+    if (!issuer || !recipient) {
+        throw new Error("Cannot derive decryption key: missing issuer or recipient address");
+    }
+
+    const keyBytes = deriveOfferSharedKey({ issuerAddress: issuer, recipientAddress: recipient });
+
+    // 2. Reconstruct IV and ciphertext
+    const iv = fromBase64(envelope.ivBase64);
+    const ciphertextBytes = fromBase64(envelope.encryptedPayload);
+
+    // 3. Decrypt with AES-256-GCM
+    const importedKey = await crypto.subtle.importKey(
+        "raw", keyBytes.buffer, { name: "AES-GCM" }, false, ["decrypt"]
+    );
+    const plainBuf = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv }, importedKey, ciphertextBytes
+    );
+
+    return JSON.parse(new TextDecoder().decode(plainBuf));
+}

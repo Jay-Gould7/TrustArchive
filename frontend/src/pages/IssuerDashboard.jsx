@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTrustProtocol } from "../hooks/useTrustProtocol";
 import { decryptWithDerivedKey, deriveFileKey, fetchEncryptedFromPinataGateway } from "../services/securityService";
-import { batchIssueEncryptedSBTs } from "../services/cryptoEnvelope";
+import { batchIssueEncryptedSBTs, encryptForSingleRecipient } from "../services/cryptoEnvelope";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -1063,7 +1063,7 @@ export default function IssuerDashboard() {
       if (size > MAX_FILE_SIZE_BYTES) throw new Error(`文件过大（${formatBytes(size)}）`);
       const attachmentType =
         (isArchiveObj ? String(issueFile.type || "") : issueFile.type) || (isPdfLike({ name }) ? "application/pdf" : "");
-      const attachmentCid = await uploadJsonToIpfs({
+      const plaintextPayload = {
         kind: "credential-offer-attachment",
         name,
         type: attachmentType,
@@ -1074,7 +1074,16 @@ export default function IssuerDashboard() {
         category: Number(issueCategory) || 0,
         issuer: account,
         createdAt: new Date().toISOString()
+      };
+
+      // Encrypt the attachment with deterministic shared key (AES-256-GCM)
+      // Key = keccak256(issuerAddr + recipientAddr + domainSalt)
+      const encryptedEnvelope = await encryptForSingleRecipient({
+        payload: plaintextPayload,
+        issuerAddress: account,
+        recipientAddress: to
       });
+      const attachmentCid = await uploadJsonToIpfs(encryptedEnvelope);
 
       let publicImageCid = "";
       if (issueBadgeFile) {

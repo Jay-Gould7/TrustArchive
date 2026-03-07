@@ -45,7 +45,8 @@ User → Encrypt → IPFS / Storage
 
 - Client-side encryption
 - Envelope encryption using master key
-- IPFS CID storage
+- Encrypted credential issuance (self-issue + batch)
+- IPFS CID storage (encrypted at rest)
 - On-chain hash anchoring
 
 ### 2. Verifiable Sharing System
@@ -104,6 +105,7 @@ Dynamic reputation based on:
 
 - AES-256-GCM symmetric encryption (Web Crypto API)  
 - ECIES asymmetric key wrapping (secp256k1)  
+- Deterministic shared-key derivation (keccak256 + solidityPacked)  
 - Public key extraction via Signature Recovery (EIP-191)  
 - Master key derivation  
 - Envelope encryption  
