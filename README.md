@@ -14,8 +14,7 @@ By preserving user privacy and data ownership, TrustArchive aims to build a high
 
 ## Key Capabilities (High Level)
 
-- End-to-end encrypted storage (envelope encryption)
-- Hybrid encryption batch issuance (AES-256-GCM + ECIES Digital Envelope)
+- End-to-end encrypted storage & hybrid issuance (AES-256-GCM + ECIES Digital Envelope)
 - Public key registry via signature recovery (EIP-191)
 - Verifiable evidence and secure proof sharing
 - Personal on-chain archive registry (ArchivesRegistry)
@@ -98,6 +97,7 @@ Dynamic reputation based on:
 
 ### Smart Contracts
 
+- **Language:** Solidity (v0.8+)
 - **Environment:** Hardhat  
 - **Core Library:** OpenZeppelin  
 
