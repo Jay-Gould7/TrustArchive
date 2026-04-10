@@ -5,6 +5,8 @@ A privacy-first decentralized personal data and credential protocol.
 ![Status](https://img.shields.io/badge/status-Prototype-orange)
 ![Tech](https://img.shields.io/badge/Stack-Web3%20%7C%20Security-purple)
 
+🚧 **Note**: Significant frontend optimizations and UI refinements are planned for future updates.
+
 TrustArchive is a decentralized trust archiving system designed to record and verify on-chain digital reputation.  
 It enables users to securely store sensitive data, generate verifiable evidence, and selectively disclose information without exposing the original files.
 
